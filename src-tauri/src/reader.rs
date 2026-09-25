@@ -244,8 +244,13 @@ fn read_record(path: &Path) -> Result<String, String> {
             path.display()
         ));
     }
-    fs::read_to_string(path)
-        .map_err(|error| format!("Cannot read {} as UTF-8: {error}", path.display()))
+    let text = fs::read_to_string(path)
+        .map_err(|error| format!("Cannot read {} as UTF-8: {error}", path.display()))?;
+    let without_crlf = text.replace("\r\n", "");
+    if without_crlf.contains('\r') || (text.contains("\r\n") && without_crlf.contains('\n')) {
+        return Err(format!("{} contains bare CR or mixed line endings.", path.display()));
+    }
+    Ok(text)
 }
 
 fn parse_frontmatter<'a>(
@@ -556,7 +561,7 @@ fn parse_work_item(heading: &str, lines: &[String], path: &str) -> Result<WorkIt
         outcome: required("Outcome")?,
         acceptance: required("Acceptance")?,
         steps,
-        evidence: parse_inline_list(&required("Evidence")?, path)?,
+        evidence: parse_evidence(&required("Evidence")?, path)?,
         next_action,
     })
 }
@@ -569,6 +574,27 @@ fn reject_duplicate_ids<'a>(ids: impl Iterator<Item = &'a str>, kind: &str) -> R
         }
     }
     Ok(())
+}
+
+fn parse_evidence(value: &str, source: &str) -> Result<Vec<String>, String> {
+    let entries = if value.starts_with('[') {
+        parse_inline_list(value, source)?
+    } else {
+        vec![value.to_string()]
+    };
+    let mut seen = std::collections::HashSet::new();
+    for entry in &entries {
+        if entry.is_empty()
+            || entry.chars().count() > 200
+            || entry.trim() != entry
+            || entry.chars().any(|c| c.is_ascii_control())
+            || (value.starts_with('[') && entry.contains(['[', ']']))
+            || !seen.insert(entry)
+        {
+            return Err(format!("{source} contains an invalid or duplicate Evidence entry."));
+        }
+    }
+    Ok(entries)
 }
 
 fn parse_inline_list(value: &str, source: &str) -> Result<Vec<String>, String> {
@@ -626,6 +652,29 @@ mod tests {
             "---\nformat_version: 1\nid: ADR-0001\nstatus: accepted\ncreated: 2026-09-01\naccepted: 2026-09-02\nscope: reader/files\n---\n\n# Read files directly\n\n## Decision\n\nRead canonical files directly.\n\n## Problem\n\nThe viewer needs current state.\n\n## Drivers\n\nLocal state.\n\n## Considered alternatives\n\nA database was rejected.\n\n## Consequences\n\nFiles remain authoritative.\n\n## Confirmation\n\nCompare loaded state.\n\n## Revisit when\n\nThe native format changes.\n",
         );
         temp
+    }
+
+    #[test]
+    fn evidence_preserves_plain_text_and_legacy_quotes() {
+        let text = "Tests A, B passed; checked [selector] and \"output\".";
+        assert_eq!(parse_evidence(text, "fixture").unwrap(), vec![text]);
+        assert_eq!(parse_evidence("[\"literal\"]", "fixture").unwrap(), vec!["\"literal\""]);
+        assert_eq!(parse_evidence("[first, second]", "fixture").unwrap(), vec!["first", "second"]);
+        assert!(parse_evidence("bad\tvalue", "fixture").is_err());
+        assert!(parse_evidence("[duplicate, duplicate]", "fixture").is_err());
+    }
+
+    #[test]
+    fn reads_crlf_project_with_plain_evidence() {
+        let project = valid_project(true);
+        let path = project.path().join("docs/plans/0001-demo.md");
+        let text = fs::read_to_string(&path).unwrap()
+            .replace("Evidence: [Fixture passed]", "Evidence: Tests A, B passed; checked [viewer].")
+            .replace("\n", "\r\n");
+        fs::write(&path, text).unwrap();
+        let snapshot = read_project(project.path()).unwrap();
+        assert_eq!(snapshot.plans[0].work_items[0].evidence,
+            vec!["Tests A, B passed; checked [viewer]."]);
     }
 
     #[test]

@@ -38,10 +38,9 @@ cargo test --manifest-path src-tauri/Cargo.toml
 npm run tauri build
 ```
 
-The retained member GitHub Actions matrix defines Linux x64, Windows x64,
-macOS Apple Silicon and macOS Intel bundles without publishing a release.
-Its member-local location does not activate it as a suite-root workflow.
-Platform signing and
+The suite-root and standalone-member GitHub Actions workflows define Linux x64,
+Windows x64, macOS Apple Silicon and macOS Intel bundles plus one checksum
+manifest without publishing a release. Platform signing and
 notarization are intentionally outside this development build. Windows x64 was
 built and launched locally. macOS and Linux runtime behavior remains unverified;
 their jobs validate compilation, tests, and packaging only.
