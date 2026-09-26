@@ -17,7 +17,7 @@ npm run tauri dev
 The folder picker accepts a project root containing `PROJECT_INDEX.md`,
 `docs/plans`, and `docs/decisions`. The portable project list is stored as
 `scoville-plan-viewer.xml` next to the executable. Removing an entry does not
-edit its repository. On macOS the file sits beside the `.app` bundle; an
+edit its repository. On macOS the file sits beside the `.app` bundle. An
 AppImage uses its outer `APPIMAGE` location instead of the read-only runtime
 mount. When an installer places the application in a read-only system folder,
 the same XML file is stored in the platform user configuration directory.
@@ -42,5 +42,5 @@ The suite-root and standalone-member GitHub Actions workflows define Linux x64,
 Windows x64, macOS Apple Silicon and macOS Intel bundles plus one checksum
 manifest without publishing a release. Platform signing and
 notarization are intentionally outside this development build. Windows x64 was
-built and launched locally. macOS and Linux runtime behavior remains unverified;
+built and launched locally. macOS and Linux runtime behavior remains unverified.
 their jobs validate compilation, tests, and packaging only.
