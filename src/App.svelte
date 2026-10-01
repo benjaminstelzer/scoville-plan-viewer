@@ -43,6 +43,8 @@
   let refreshInFlight = false;
   let openWorkItems = new Set<string>();
   let openDecisions = new Set<string>();
+  let planOverviewOpen = true;
+  let currentPanelOpen = true;
   let overviewEntries: Array<{ project: SavedProject; snapshot: ProjectSnapshot | null; error: string }> = [];
 
   $: selectedProject = projects.find((project) => project.id === selectedId) ?? null;
@@ -496,12 +498,36 @@
     </main>
   {:else}
     <main class="dashboard">
-      <section class="project-heading" aria-labelledby="project-title">
-        <div>
-          <p class="project-name">{snapshot.name}</p>
-          <p class="eyebrow">{selectedPlan?.status === "active" ? `Active Plan · ${selectedPlan.id}` : selectedPlan ? `Plan history · ${selectedPlan.id}` : "Project idle"}</p>
-          <h1 id="project-title">{selectedPlan?.title ?? snapshot.name}</h1>
+      <Collapsible.Root class="project-heading" open={planOverviewOpen} onOpenChange={(open) => planOverviewOpen = open}>
+        <h1 id="project-title" class="plan-header">
+          <Collapsible.Trigger class="panel-toggle">
+            <span class="plan-heading-copy">
+              <span class="plan-heading-context">{snapshot.name}{selectedPlan ? ` · ${selectedPlan.id} · ${selectedPlan.status === "active" ? "Active" : "History"}` : ""}</span>
+              <span class="plan-heading-title">{selectedPlan?.title ?? "No active Plan"}</span>
+            </span>
+            <ChevronDownIcon class="disclosure" aria-hidden="true" />
+          </Collapsible.Trigger>
+        </h1>
+        <Collapsible.Content class="project-heading-body">
           {#if selectedPlan}
+            <section class="progress-band" aria-label="Plan point progress">
+              <div class="progress-copy">
+                <strong class="progress-label">Plan points</strong>
+                <span>{progress.done} completed</span>
+                <span>{progress.in_progress} in progress</span>
+                <span>{progress.paused} paused</span>
+                <span>{progress.todo} upcoming</span>
+                {#if progress.cancelled}<span>{progress.cancelled} cancelled</span>{/if}
+              </div>
+              <div class="progress-track" aria-hidden="true">
+                {#if selectedPlan.work_items.length}
+                  <span class="done" style:width={`${(progress.done / selectedPlan.work_items.length) * 100}%`}></span>
+                  <span class="active" style:width={`${(progress.in_progress / selectedPlan.work_items.length) * 100}%`}></span>
+                  <span class="paused" style:width={`${(progress.paused / selectedPlan.work_items.length) * 100}%`}></span>
+                  <span class="cancelled" style:width={`${(progress.cancelled / selectedPlan.work_items.length) * 100}%`}></span>
+                {/if}
+              </div>
+            </section>
             <Collapsible.Root class="plan-goal">
               <Collapsible.Trigger class="plan-goal-summary">
                 <strong>Plan goal</strong>
@@ -514,51 +540,33 @@
           {:else}
             <p class="project-goal">This project currently has no active Plan.</p>
           {/if}
-        </div>
-      </section>
+        </Collapsible.Content>
+      </Collapsible.Root>
 
       {#if selectedPlan?.status === "active" && currentItem}
-        <section class="current-card" aria-labelledby="current-title">
-          <div class="current-index" aria-hidden="true">{stepNumber(selectedPlan.work_items.findIndex((item) => item.id === currentItem.id), selectedPlan.work_items.length)}</div>
-          <div class="current-main">
-            <div class="current-meta">
-              <Badge variant={currentItem.status === "in_progress" ? "default" : "secondary"} class="status-pill {currentItem.status}">{workStatusLabel(currentItem.status)}</Badge>
-              <span>Current Plan point · {currentItem.id}</span>
-            </div>
-            <h2 id="current-title">{currentItem.title}</h2>
+        <Collapsible.Root class="current-card" open={currentPanelOpen} onOpenChange={(open) => currentPanelOpen = open}>
+          <Collapsible.Trigger class="current-toggle">
+            <span class="current-index" aria-hidden="true">{stepNumber(selectedPlan.work_items.findIndex((item) => item.id === currentItem.id), selectedPlan.work_items.length)}</span>
+            <span class="current-trigger-copy">
+              <span class="current-meta">
+                <Badge variant={currentItem.status === "in_progress" ? "default" : "secondary"} class="status-pill {currentItem.status}">{workStatusLabel(currentItem.status)}</Badge>
+                <span>Current Plan point · {currentItem.id}</span>
+                {#if currentItem.blocked_by.length}<Badge variant="secondary" class="blocked-label">Blocked</Badge>{/if}
+              </span>
+              <span class="current-trigger-title">{currentItem.title}</span>
+              {#if stepSummary(currentItem)}<span class="current-trigger-progress step-progress">{stepSummary(currentItem)}</span>{/if}
+            </span>
+            <ChevronDownIcon class="disclosure" aria-hidden="true" />
+          </Collapsible.Trigger>
+          <Collapsible.Content class="current-body">
             <p>{currentItem.outcome}</p>
             {#if stepSummary(currentItem)}<p class="step-progress">{stepSummary(currentItem)}</p>{/if}
-          </div>
-          {#if stepPosition(currentItem).numbers.length}
-            <div class="next-step">
-              <span class="callout-label">Next step</span>
-              <StepList item={currentItem} numbers={stepPosition(currentItem).numbers} />
-              {#if stepPosition(currentItem).untracked.length}<p class="step-position-note">Progress incomplete · {stepPosition(currentItem).untracked.length} without status</p>{/if}
-            </div>
-          {/if}
-          {#if currentItem.blocked_by.length}
-            <div class="blocker"><span>Blocked by</span><strong>{currentItem.blocked_by.join(", ")}</strong></div>
-          {/if}
-        </section>
+            {#if currentItem.blocked_by.length}
+              <div class="blocker"><span>Blocked by</span><strong>{currentItem.blocked_by.join(", ")}</strong></div>
+            {/if}
+          </Collapsible.Content>
+        </Collapsible.Root>
       {/if}
-
-      <section class="progress-band" aria-label="Plan progress">
-        <div class="progress-copy">
-          <strong>{progress.done} completed</strong>
-          <span>{progress.in_progress} in progress</span>
-          <span>{progress.paused} paused</span>
-          <span>{progress.todo} upcoming</span>
-          {#if progress.cancelled}<span>{progress.cancelled} cancelled</span>{/if}
-        </div>
-        <div class="progress-track" aria-hidden="true">
-          {#if selectedPlan?.work_items.length}
-            <span class="done" style:width={`${(progress.done / selectedPlan.work_items.length) * 100}%`}></span>
-            <span class="active" style:width={`${(progress.in_progress / selectedPlan.work_items.length) * 100}%`}></span>
-            <span class="paused" style:width={`${(progress.paused / selectedPlan.work_items.length) * 100}%`}></span>
-            <span class="cancelled" style:width={`${(progress.cancelled / selectedPlan.work_items.length) * 100}%`}></span>
-          {/if}
-        </div>
-      </section>
 
       <Tabs.Root bind:value={compactPane} class="compact-tabs">
         <Tabs.List variant="line" aria-label="Project information">
@@ -570,7 +578,7 @@
       <div class="content-grid">
         <div id="plan-panel" role="tabpanel" class="pane plan-pane" class:compact-hidden={compactPane !== "plan"} aria-labelledby="plan-tab">
           <div class="section-heading">
-            <div><p class="eyebrow">Ordered work</p><h2 id="work-heading">Plan points</h2></div>
+            <h2 id="work-heading">Plan points</h2>
             <div class="filter-row" aria-label="Filter plan points">
               {#each [["all", "All"], ["in_progress", "Active"], ["todo", "Upcoming"], ["paused", "Paused"], ["done", "Completed"], ["cancelled", "Cancelled"], ["blocked", "Blocked"]] as option}
                 <Button size="sm" aria-pressed={workFilter === option[0]} variant={workFilter === option[0] ? "default" : "ghost"} onclick={() => selectWorkFilter(option[0] as typeof workFilter)}>{option[1]}</Button>
@@ -643,7 +651,7 @@
 
         <div id="decisions-panel" role="tabpanel" class="pane decisions-pane" class:compact-hidden={compactPane !== "decisions"} aria-labelledby="decisions-tab">
           <div class="section-heading">
-            <div><p class="eyebrow">Project direction</p><h2 id="decision-heading">Decisions</h2></div>
+            <h2 id="decision-heading">Decisions</h2>
           </div>
           <div class="decision-filters" aria-label="Filter decisions">
             {#each [["current", "Current"], ["proposed", "Proposed"], ["history", "History"], ["all", "All"]] as option}
