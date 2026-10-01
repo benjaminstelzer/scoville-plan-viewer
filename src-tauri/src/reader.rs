@@ -7,6 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 const MAX_RECORD_BYTES: u64 = 2 * 1024 * 1024;
 const PLAN_STATUSES: &[&str] = &["draft", "active", "completed", "cancelled"];
 const WORK_STATUSES: &[&str] = &["todo", "in_progress", "paused", "done", "cancelled"];
+const STEP_STATUSES: &[&str] = &["todo", "in_progress", "done", "cancelled"];
 const DECISION_STATUSES: &[&str] = &[
     "proposed",
     "accepted",
@@ -50,8 +51,17 @@ pub struct WorkItem {
     outcome: String,
     acceptance: String,
     steps: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    step_statuses: Option<Vec<StepProgress>>,
     evidence: Vec<String>,
     next_action: Option<String>,
+    instructions: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct StepProgress {
+    number: usize,
+    status: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -537,6 +547,10 @@ fn parse_work_item(heading: &str, lines: &[String], path: &str) -> Result<WorkIt
             "{path} uses unsupported Work Item status {status} in {id}."
         ));
     }
+    let instructions = fields.get("Instructions").cloned();
+    if instructions.as_ref().is_some_and(|value| value.is_empty()) {
+        return Err(format!("{path} Work Item {id}: Instructions must be one-line text or exactly Instructions: []."));
+    }
     let next_action = fields
         .get("Next action")
         .filter(|value| !value.is_empty())
@@ -546,9 +560,13 @@ fn parse_work_item(heading: &str, lines: &[String], path: &str) -> Result<WorkIt
             "{path} retains Next action on terminal Work Item {id}."
         ));
     }
-    if ["todo", "in_progress", "paused"].contains(&status.as_str()) && next_action.is_none() {
+    let progress: Vec<StepProgress> = steps.iter().enumerate()
+        .map(|(index, text)| parse_step_progress(text, index + 1, path, id))
+        .collect::<Result<_, _>>()?;
+    let step_statuses = progress.iter().any(|step| step.status.is_some()).then_some(progress);
+    if ["todo", "in_progress", "paused"].contains(&status.as_str()) && next_action.is_none() && step_statuses.is_none() {
         return Err(format!(
-            "{path} is missing Next action on non-terminal Work Item {id}."
+            "{path} needs written Step status or a nonempty legacy Next action on non-terminal Work Item {id}."
         ));
     }
     Ok(WorkItem {
@@ -561,9 +579,36 @@ fn parse_work_item(heading: &str, lines: &[String], path: &str) -> Result<WorkIt
         outcome: required("Outcome")?,
         acceptance: required("Acceptance")?,
         steps,
+        step_statuses,
         evidence: parse_evidence(&required("Evidence")?, path)?,
         next_action,
+        instructions,
     })
+}
+
+fn status_annotation(text: &str) -> bool {
+    text.strip_prefix("[status").is_some_and(|rest|
+        rest.starts_with(':') || rest.starts_with(']') || rest.starts_with(char::is_whitespace))
+}
+
+fn parse_step_progress(text: &str, number: usize, path: &str, item: &str) -> Result<StepProgress, String> {
+    let invalid = || format!("{path} {item}/step-{number}: invalid Step status; use one optional [status: todo|in_progress|done|cancelled] first, before route/execute and non-empty action, e.g. {number}. [status: done] Verify the result.");
+    let mut remainder = text;
+    let mut status = None;
+    if status_annotation(remainder) {
+        let (value, action) = remainder.strip_prefix("[status: ")
+            .and_then(|s| s.split_once("] ")).ok_or_else(invalid)?;
+        if !STEP_STATUSES.contains(&value) || action.trim().is_empty() { return Err(invalid()); }
+        status = Some(value.to_string());
+        remainder = action;
+    }
+    for prefix in ["[route: ", "[execute: "] {
+        if let Some(annotation) = remainder.strip_prefix(prefix) {
+            if let Some((_, action)) = annotation.split_once("] ") { remainder = action; }
+        }
+        if status_annotation(remainder) { return Err(invalid()); }
+    }
+    Ok(StepProgress { number, status })
 }
 
 fn reject_duplicate_ids<'a>(ids: impl Iterator<Item = &'a str>, kind: &str) -> Result<(), String> {
@@ -652,6 +697,59 @@ mod tests {
             "---\nformat_version: 1\nid: ADR-0001\nstatus: accepted\ncreated: 2026-09-01\naccepted: 2026-09-02\nscope: reader/files\n---\n\n# Read files directly\n\n## Decision\n\nRead canonical files directly.\n\n## Problem\n\nThe viewer needs current state.\n\n## Drivers\n\nLocal state.\n\n## Considered alternatives\n\nA database was rejected.\n\n## Consequences\n\nFiles remain authoritative.\n\n## Confirmation\n\nCompare loaded state.\n\n## Revisit when\n\nThe native format changes.\n",
         );
         temp
+    }
+
+    #[test]
+    fn optional_step_status_preserves_legacy_and_mixed_reader_data() {
+        let project = valid_project(true);
+        let path = project.path().join("docs/plans/0001-demo.md");
+        let original = fs::read_to_string(&path).unwrap();
+        let legacy = serde_json::to_value(read_project(project.path()).unwrap()).unwrap();
+        assert!(legacy["plans"][0]["work_items"][1].get("step_statuses").is_none());
+        for ending in ["\n", "\r\n"] {
+            let changed = original.replace("1. Build the view.\n2. Inspect the view.",
+                "1. [status: done] [route: low] Build the view.\n2. Inspect the view.\n3. [status: in_progress] [execute: reasoning=medium] Check the result.\n4. [status: cancelled] Retired task.");
+            fs::write(&path, changed.replace("\n", ending)).unwrap();
+            let snapshot = read_project(project.path()).unwrap();
+            let item = &snapshot.plans[0].work_items[1];
+            assert_eq!(item.steps[1], "Inspect the view.");
+            let statuses = item.step_statuses.as_ref().unwrap();
+            assert_eq!(statuses[0].status.as_deref(), Some("done"));
+            assert_eq!(statuses[1].status, None);
+            assert_eq!(statuses[2].number, 3);
+            assert_eq!(statuses[3].status.as_deref(), Some("cancelled"));
+        }
+    }
+
+    #[test]
+    fn written_progress_replaces_legacy_action_and_instructions_preserve_presence() {
+        let project = valid_project(true);
+        let path = project.path().join("docs/plans/0001-demo.md");
+        let original = fs::read_to_string(&path).unwrap()
+            .replace("1. Build the view.", "1. [status: todo] Build the view.")
+            .replace("Next action: Inspect the rendered project.\n", "");
+        fs::write(&path, &original).unwrap();
+        let snapshot = read_project(project.path()).unwrap();
+        assert!(snapshot.plans[0].work_items[1].next_action.is_none());
+        assert!(snapshot.plans[0].work_items[1].instructions.is_none());
+        for value in ["[]", "Before completion, independently review the view."] {
+            fs::write(&path, original.replace("Steps:\n", &format!("Instructions: {value}\nSteps:\n"))).unwrap();
+            assert_eq!(read_project(project.path()).unwrap().plans[0].work_items[1].instructions.as_deref(), Some(value));
+        }
+        fs::write(&path, original.replace("Steps:\n", "Instructions:\nSteps:\n")).unwrap();
+        assert!(read_project(project.path()).unwrap_err().contains("Instructions"));
+    }
+
+    #[test]
+    fn invalid_step_status_reports_location_and_correction() {
+        for text in ["[status: paused] Read.", "[status:done] Read.",
+            "[status: done] [status: todo] Read.", "[route: low] [status: done] Read.", "[status: done]"] {
+            let error = parse_step_progress(text, 2, "docs/plans/0001-test.md", "W-001").unwrap_err();
+            assert!(error.contains("W-001/step-2"));
+            assert!(error.contains("todo|in_progress|done|cancelled"));
+            assert!(parse_step_progress("[status: done] Verify the result.", 2, "fixture", "W-001").is_ok());
+        }
+        assert!(parse_step_progress("Document the example [status: done].", 1, "fixture", "W-001").unwrap().status.is_none());
     }
 
     #[test]

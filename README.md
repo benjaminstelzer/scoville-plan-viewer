@@ -4,15 +4,12 @@ A local, read-only desktop viewer for Scoville Plan format version 1 projects.
 It shows the active Plan point, completed and upcoming work, current Decisions,
 and superseded Decision history across a saved list of project folders.
 
-## Run locally
+## Run the Viewer
 
-From `members/scoville-plan/development/viewer/` in Scoville Suite, install
-Node.js 22 and the stable Rust MSVC toolchain on Windows, then run:
-
-```text
-npm ci
-npm run tauri dev
-```
+Download the executable or installer for your platform from a successful
+GitHub Actions `Plan Viewer` run. Native builds run only on GitHub, for
+Windows x64, Linux x64, macOS Apple Silicon and macOS Intel. Do not install
+Rust or compile the native Viewer locally.
 
 The folder picker accepts a project root containing `PROJECT_INDEX.md`,
 `docs/plans`, and `docs/decisions`. The portable project list is stored as
@@ -31,16 +28,12 @@ visualization.
 
 ## Validation
 
-```text
-npm run check
-npm run build
-cargo test --manifest-path src-tauri/Cargo.toml
-npm run tauri build
-```
+The suite-root and standalone-member GitHub Actions workflows check the
+frontend, test the project reader, build all four platform bundles and create
+`SHA256SUMS.txt`. Dispatch the workflow on the branch containing the intended
+Viewer changes. Download all platform artifacts and verify their checksums
+before retaining the build under `skills/temp/release/viewer/`.
 
-The suite-root and standalone-member GitHub Actions workflows define Linux x64,
-Windows x64, macOS Apple Silicon and macOS Intel bundles plus one checksum
-manifest without publishing a release. Platform signing and
-notarization are intentionally outside this development build. Windows x64 was
-built and launched locally. macOS and Linux runtime behavior remains unverified.
-their jobs validate compilation, tests, and packaging only.
+These workflows do not publish a release. Platform signing and notarization
+are outside this development build. Compilation, tests and packaging do not
+verify runtime behavior on each platform.

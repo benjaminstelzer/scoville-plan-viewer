@@ -16,6 +16,8 @@
   import CircleIcon from "@lucide/svelte/icons/circle";
   import PlayIcon from "@lucide/svelte/icons/play";
   import Pagination from "$lib/components/Pagination.svelte";
+  import StepList from "$lib/components/StepList.svelte";
+  import { stepStatus, stepPosition } from "$lib/step-progress";
   import { demoSnapshot, paginationDemoSnapshot } from "./lib/demo";
   import type { Decision, ProjectRegistry, ProjectSnapshot, SavedProject, WorkItem, WorkStatus } from "./lib/types";
   const demoEnabled = import.meta.env.DEV || import.meta.env.VITE_DEMO === "true";
@@ -325,6 +327,33 @@
     pane?.querySelector<HTMLElement>(kind === "work" ? ".work-summary" : ".decision-summary")?.focus({ preventScroll: true });
   }
 
+  function activeStepLabel(item: WorkItem) {
+    const numbers = item.steps.map((_, index) => index + 1)
+      .filter((number) => stepStatus(item, number) === "in_progress");
+    const ranges: string[] = [];
+    for (let index = 0; index < numbers.length; index++) {
+      const first = numbers[index];
+      let last = first;
+      while (numbers[index + 1] === last + 1) last = numbers[++index];
+      ranges.push(first === last ? String(first) : `${first}–${last}`);
+    }
+    const steps = `Step${numbers.length > 1 ? "s" : ""} ${ranges.join(", ")}`;
+    return ranges.length ? (item.status === "paused" ? `Paused at ${steps}` : `${steps} in progress`) : "";
+  }
+
+  function stepSummary(item: WorkItem) {
+    if (!item.step_statuses?.some((entry) => entry.status !== null)) return "";
+    const statuses = item.steps.map((_, index) => stepStatus(item, index + 1));
+    const done = statuses.filter((status) => status === "done").length;
+    const unknown = statuses.filter((status) => status === null).length;
+    const cancelled = statuses.filter((status) => status === "cancelled").length;
+    return [`${done} completed / ${item.steps.length} Steps`, activeStepLabel(item),
+      cancelled ? `${cancelled} cancelled` : "", unknown ? `${unknown} without status` : "",
+      stepPosition(item).reason === "steps_terminal_work_item_acceptance_pending" ? "Work Item acceptance pending" : ""]
+      .filter(Boolean).join(" · ");
+  }
+
+
   function workStatusLabel(status: WorkStatus) {
     return ({ todo: "Upcoming", in_progress: "In progress", paused: "Paused", done: "Completed", cancelled: "Cancelled" })[status];
   }
@@ -498,11 +527,15 @@
             </div>
             <h2 id="current-title">{currentItem.title}</h2>
             <p>{currentItem.outcome}</p>
+            {#if stepSummary(currentItem)}<p class="step-progress">{stepSummary(currentItem)}</p>{/if}
           </div>
-          <div class="next-action">
-            <span>Next action</span>
-            <strong>{currentItem.next_action}</strong>
-          </div>
+          {#if stepPosition(currentItem).numbers.length}
+            <div class="next-step">
+              <span class="callout-label">Next step</span>
+              <StepList item={currentItem} numbers={stepPosition(currentItem).numbers} />
+              {#if stepPosition(currentItem).untracked.length}<p class="step-position-note">Progress incomplete · {stepPosition(currentItem).untracked.length} without status</p>{/if}
+            </div>
+          {/if}
           {#if currentItem.blocked_by.length}
             <div class="blocker"><span>Blocked by</span><strong>{currentItem.blocked_by.join(", ")}</strong></div>
           {/if}
@@ -561,7 +594,7 @@
                     {:else}<CircleIcon />
                     {/if}
                   </span>
-                  <span class="item-title"><small>{item.id} · {workStatusLabel(item.status)}</small><strong>{item.title}</strong></span>
+                  <span class="item-title"><small>{item.id} · {workStatusLabel(item.status)}</small><strong>{item.title}</strong>{#if stepSummary(item)}<span class="step-progress">{stepSummary(item)}</span>{/if}</span>
                   {#if item.status === "paused" || item.status === "cancelled" || item.blocked_by.length}
                     <span class="work-labels">
                       {#if item.status === "paused"}<Badge variant="secondary" class="status-pill paused">Paused</Badge>{/if}
@@ -573,18 +606,22 @@
                 </Collapsible.Trigger>
                 <Collapsible.Content class="item-detail">
                   <p>{item.outcome}</p>
-                  {#if item.next_action}<div class="detail-callout"><span>Next action</span><strong>{item.next_action}</strong></div>{/if}
+                  {#if stepPosition(item).numbers.length}
+                    <div class="detail-callout next-step">
+                      <span class="callout-label">Next step</span>
+                      <StepList {item} numbers={stepPosition(item).numbers} />
+                      {#if stepPosition(item).untracked.length}<p class="step-position-note">Progress incomplete · {stepPosition(item).untracked.length} without status</p>{/if}
+                    </div>
+                  {/if}
                   <dl>
                     <div><dt>Acceptance</dt><dd>{item.acceptance}</dd></div>
+                    {#if item.instructions && item.instructions !== "[]"}<div><dt>Instructions</dt><dd>{item.instructions}</dd></div>{/if}
+                    {#if item.status !== "done" && item.status !== "cancelled" && item.decisions.some((id) => decisionById(id)?.status === "proposed")}<div><dt>Open decisions</dt><dd>{item.decisions.filter((id) => decisionById(id)?.status === "proposed").join(", ")}</dd></div>{/if}
                     {#if item.steps.length}
                       <div>
                         <dt>Steps</dt>
                         <dd>
-                          <ol class="work-steps">
-                            {#each item.steps as step}
-                              <li>{step}</li>
-                            {/each}
-                          </ol>
+                          <StepList {item} />
                         </dd>
                       </div>
                     {/if}

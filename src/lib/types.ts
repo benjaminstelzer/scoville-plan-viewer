@@ -2,6 +2,9 @@ export type PlanStatus = "draft" | "active" | "completed" | "cancelled";
 export type WorkStatus = "todo" | "in_progress" | "paused" | "done" | "cancelled";
 export type DecisionStatus = "proposed" | "accepted" | "rejected" | "deprecated" | "superseded";
 
+export type StepStatus = "todo" | "in_progress" | "done" | "cancelled";
+export interface StepProgress { number: number; status: StepStatus | null; }
+
 export interface WorkItem {
   id: string;
   title: string;
@@ -12,8 +15,10 @@ export interface WorkItem {
   outcome: string;
   acceptance: string;
   steps: string[];
+  step_statuses?: StepProgress[];
   evidence: string[];
   next_action: string | null;
+  instructions?: string | null;
 }
 
 export interface Plan {
