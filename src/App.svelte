@@ -572,7 +572,7 @@
           <div class="section-heading">
             <div><p class="eyebrow">Ordered work</p><h2 id="work-heading">Plan points</h2></div>
             <div class="filter-row" aria-label="Filter plan points">
-              {#each [["all", "All"], ["in_progress", "Active"], ["todo", "Upcoming"], ["done", "Completed"], ["blocked", "Blocked"]] as option}
+              {#each [["all", "All"], ["in_progress", "Active"], ["todo", "Upcoming"], ["paused", "Paused"], ["done", "Completed"], ["cancelled", "Cancelled"], ["blocked", "Blocked"]] as option}
                 <Button size="sm" aria-pressed={workFilter === option[0]} variant={workFilter === option[0] ? "default" : "ghost"} onclick={() => selectWorkFilter(option[0] as typeof workFilter)}>{option[1]}</Button>
               {/each}
             </div>
