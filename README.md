@@ -1,39 +1,74 @@
 # Scoville Plan Viewer
 
-A local, read-only desktop viewer for Scoville Plan format version 1 projects.
-It shows the active Plan point, completed and upcoming work, current Decisions,
-and superseded Decision history across a saved list of project folders.
+Long work leaves its decisions and progress in more than one project. Scoville
+Plan Viewer reads those local records and shows what is current, finished or
+still open. The application has its own builds and updates, separate from the
+Scoville Plan Skill.
 
-## Run the Viewer
+## How it works
 
-Download the executable or installer for your platform from a successful
-GitHub Actions `Plan Viewer` run. Native builds run only on GitHub, for
-Windows x64, Linux x64, macOS Apple Silicon and macOS Intel. Do not install
-Rust or compile the native Viewer locally.
+- Add project folders containing `PROJECT_INDEX.md`, `docs/plans` and `docs/decisions`.
+- Browse Plans, Step progress and current or superseded Decisions.
+- Refresh the displayed records automatically while the application is active.
 
-The folder picker accepts a project root containing `PROJECT_INDEX.md`,
-`docs/plans`, and `docs/decisions`. The portable project list is stored as
-`scoville-plan-viewer.xml` next to the executable. Removing an entry does not
-edit its repository. On macOS the file sits beside the `.app` bundle. An
-AppImage uses its outer `APPIMAGE` location instead of the read-only runtime
-mount. When an installer places the application in a read-only system folder,
-the same XML file is stored in the platform user configuration directory.
+## What it enforces
 
-## Interface system
+- Projects are read-only. Removing an entry from the Viewer leaves its files alone.
+- Release downloads come from four platform builds and include SHA-256 checksums.
 
-The interface uses current shadcn-svelte components and tokens with Svelte 5,
-Tailwind CSS 4, Bits UI primitives, Inter, and Lucide icons. Local CSS owns only
-the viewer layout and the domain-specific Plan and Decision status
-visualization.
+## What it costs
 
-## Validation
+- Keep local project paths accessible and use a Viewer that supports your Plan format.
 
-The suite-root and standalone-member GitHub Actions workflows check the
-frontend, test the project reader, build all four platform bundles and create
-`SHA256SUMS.txt`. Dispatch the workflow on the branch containing the intended
-Viewer changes. Download all platform artifacts and verify their checksums
-before retaining the build under `skills/temp/release/viewer/`.
+## How it was developed
 
-These workflows do not publish a release. Platform signing and notarization
-are outside this development build. Compilation, tests and packaging do not
-verify runtime behavior on each platform.
+The Viewer grew alongside Scoville Plan to make repository records easier to
+read across sessions. It now lives here so application builds can evolve without
+turning every Skill correction into an installer release. Scoville measures
+chili heat; the Viewer makes the resulting paperwork easier to digest.
+
+## Compatibility
+
+Reads Scoville Plan `format_version: 1` records, including explicit Step progress.
+Builds target Windows x64, Linux x64, macOS Apple Silicon and macOS Intel.
+
+## Install
+
+Download the application or installer for your platform from
+[the latest release](https://github.com/benjaminstelzer/scoville-plan-viewer/releases/latest).
+Windows provides a portable EXE, MSI and setup EXE. Linux provides a portable
+binary, AppImage, DEB and RPM. Each macOS architecture has a zipped app and DMG.
+Use `SHA256SUMS.txt` to check the downloaded file.
+
+## Configuration
+
+Portable copies store `scoville-plan-viewer.xml` beside the executable or macOS
+app bundle. An AppImage uses its outer location. An installation in a read-only
+system folder stores that list in the platform user configuration directory.
+Keep your existing XML file when replacing the application.
+
+## Limitations
+
+Platform signing and notarization are not included. Successful builds do not
+establish runtime behavior on every supported operating system.
+
+## How to use
+
+Open the Viewer, add a project folder and select a Plan. Its current point,
+remaining Steps and Decisions come from the repository records. The Viewer
+does not dispatch agents or edit Plans.
+
+## Related projects
+
+- [Scoville Plan Skill](https://github.com/benjaminstelzer/scoville-plan)
+- [Scoville Suite](https://github.com/benjaminstelzer/scoville-suite)
+- [Scoville Suite for Codex](https://github.com/benjaminstelzer/scoville-suite-for-codex)
+
+## Developer links
+
+See [the build and release guide](development/README.md). Native bundles are
+built by this repository's `Plan Viewer` GitHub Actions workflow.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
