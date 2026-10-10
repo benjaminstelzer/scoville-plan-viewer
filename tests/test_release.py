@@ -117,20 +117,30 @@ class ViewerReleaseGateTests(unittest.TestCase):
             api.assert_not_called()
 
     def verify_provenance(self, defect=None):
-        build = {'version': '1.4.0', 'platforms': list(gate.PLATFORMS), 'source_commit': 'a' * 40,
+        legacy = defect is not None and defect.startswith('legacy_')
+        if legacy:
+            for path in [self.root / 'package.json', self.root / 'package-lock.json', self.root / 'src-tauri/tauri.conf.json', self.root / 'src-tauri/Cargo.toml', self.root / 'src-tauri/Cargo.lock']:
+                path.write_text(path.read_text().replace('1.4.0', '1.4.3'))
+            for old in self.names:
+                (self.assets / old).rename(self.assets / old.replace('1.4.0', '1.4.3'))
+            self.names = [name.replace('1.4.0', '1.4.3') for name in self.names]
+            (self.assets / 'SHA256SUMS.txt').write_text(''.join(f'{gate.digest(self.assets / name)}  {name}\n' for name in self.names))
+        build = {'version': '1.4.3' if legacy else '1.4.0', 'platforms': list(gate.PLATFORMS), 'source_commit': gate.LEGACY_COMMIT if legacy else 'a' * 40,
                  'workflow_run': 'https://github.com/benjaminstelzer/scoville-plan-viewer/actions/runs/123'}
+        if legacy: build['workflow_run'] = gate.LEGACY_RUN
         if defect == 'old_owner': build['workflow_run'] = build['workflow_run'].replace('scoville-plan-viewer/', 'scoville-suite/')
         (self.assets / 'BUILD.json').write_text(json.dumps(build))
         jobs = ['Linux x64', 'Windows x64', 'macOS Apple Silicon', 'macOS Intel', 'Checksums', 'Plan compatibility']
+        if legacy: jobs.remove('Plan compatibility')
         def api(route):
-            if route.endswith('/actions/runs/123'):
-                return {'status': 'completed', 'conclusion': 'success', 'head_sha': 'a' * 40,
+            if route.endswith('/actions/runs/123') or route.endswith('/actions/runs/37574844077'):
+                return {'status': 'completed', 'conclusion': 'success', 'head_sha': build['source_commit'],
                         'path': gate.WORKFLOW, 'html_url': build['workflow_run']}
             if '/jobs?' in route:
                 return {'jobs': [{'name': name, 'conclusion': 'success'} for name in jobs if not (defect == 'missing_job' and name == 'Plan compatibility')]}
             if '/git/trees/' in route:
                 return {'truncated': defect == 'truncated', 'tree': [
-                    {'type': 'blob', 'path': 'src/main.ts', 'sha': 'b' * 40}]}
+                    {'type': 'blob', 'path': (gate.LEGACY_PREFIX if legacy else '') + 'src/main.ts', 'sha': 'b' * 40}]}
             if '/releases/tags/' in route:
                 assets = [{'name': p.name, 'state': 'uploaded', 'size': p.stat().st_size,
                            'digest': 'sha256:' + gate.digest(p)} for p in self.assets.iterdir() if p.name != 'BUILD.json']
@@ -139,7 +149,7 @@ class ViewerReleaseGateTests(unittest.TestCase):
             raise AssertionError(route)
         def command(*args):
             if args[0] == 'git' and 'ls-files' in args: return b'src/main.ts\nREADME.md\n'
-            if args[0] == 'git' and 'hash-object' in args: return ('c' * 40 if defect == 'changed_input' else 'b' * 40).encode()
+            if args[0] == 'git' and 'hash-object' in args: return ('c' * 40 if defect in ('changed_input', 'legacy_changed_input') else 'b' * 40).encode()
             if args[:3] == ('gh', 'run', 'download'):
                 destination = Path(args[args.index('--dir') + 1])
                 destination.mkdir()
@@ -148,10 +158,29 @@ class ViewerReleaseGateTests(unittest.TestCase):
                 return b''
             raise AssertionError(args)
         with patch.object(gate, 'api', side_effect=api), patch.object(gate, 'command', side_effect=command):
-            return gate.verify(self.root, self.assets, ['benjaminstelzer/scoville-plan-viewer=v1.4.0'])
+            return gate.verify(self.root, self.assets, ['benjaminstelzer/scoville-plan-viewer=v' + build['version']])
 
     def test_independent_source_jobs_artifacts_and_upload_pass(self):
         self.assertEqual(self.verify_provenance()['source_files_verified'], 1)
+
+    def test_original_migration_build_is_reused_with_unchanged_application(self):
+        self.assertTrue(self.verify_provenance('legacy_reuse')['original_build_reused'])
+
+    def test_original_build_cannot_cover_changed_application(self):
+        with self.assertRaisesRegex(ValueError, 'source differs'):
+            self.verify_provenance('legacy_changed_input')
+
+    def test_partial_legacy_provenance_is_rejected_before_network(self):
+        for version, commit, run in [('1.4.3', 'c' * 40, gate.LEGACY_RUN),
+                                    ('1.4.3', gate.LEGACY_COMMIT, gate.LEGACY_RUN[:-1] + '8'),
+                                    ('1.4.0', gate.LEGACY_COMMIT, gate.LEGACY_RUN)]:
+            build = {'version': version, 'platforms': list(gate.PLATFORMS),
+                     'source_commit': commit, 'workflow_run': run}
+            (self.assets / 'BUILD.json').write_text(json.dumps(build))
+            with self.subTest(version=version, commit=commit, run=run), patch.object(gate, 'api') as api, patch.object(gate, 'local_assets', return_value=(version, set(self.names), {})):
+                with self.assertRaisesRegex(ValueError, 'BUILD.json must identify'):
+                    gate.verify(self.root, self.assets)
+                api.assert_not_called()
 
     def test_provenance_rejects_old_owner_missing_job_partial_tree_drift_and_extra_upload(self):
         for defect in ('old_owner', 'missing_job', 'truncated', 'changed_input', 'extra_upload'):

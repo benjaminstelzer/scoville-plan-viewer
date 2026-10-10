@@ -11,6 +11,10 @@ import tomllib
 
 VIEWER = '.'
 REPOSITORY = 'benjaminstelzer/scoville-plan-viewer'
+# Original 1.4.3 binaries are transferred without changing their build provenance.
+LEGACY_RUN = 'https://github.com/benjaminstelzer/scoville-suite/actions/runs/37574844077'
+LEGACY_COMMIT = 'ba11cab7d2e737c737fefca0db772669ec239529'
+LEGACY_PREFIX = 'members/scoville-plan/development/viewer/'
 BUILD_FILES = {'package.json', 'package-lock.json', 'index.html', 'tsconfig.json',
                'vite.config.ts', 'components.json', '.github/workflows/plan-viewer.yml'}
 
@@ -88,25 +92,33 @@ def verify(root, assets, releases=()):
     if releases and releases[0].split('=')[1] != 'v' + version:
         raise ValueError('--release tag must equal the agreed Viewer version v' + version)
     build = json.loads((assets / 'BUILD.json').read_text(encoding='utf-8'))
+    legacy = (build['workflow_run'] == LEGACY_RUN and build['source_commit'] == LEGACY_COMMIT
+              and version == '1.4.3')
     match = re.fullmatch(r'https://github.com/(benjaminstelzer/scoville-plan-viewer)/actions/runs/(\d+)', build['workflow_run'])
-    if not match or build['version'] != version or sorted(build['platforms']) != sorted(PLATFORMS):
+    if (not match and not legacy) or build['version'] != version or sorted(build['platforms']) != sorted(PLATFORMS):
         raise ValueError('BUILD.json must identify the current version, four platforms and canonical Viewer Actions run')
-    repo, run_id = match.groups()
+    repo, run_id = ('benjaminstelzer/scoville-suite', '37574844077') if legacy else match.groups()
     run = api(f'repos/{repo}/actions/runs/{run_id}')
     if (run['status'] != 'completed' or run['conclusion'] != 'success'
             or run['head_sha'] != build['source_commit'] or run['path'] != WORKFLOW):
         raise ValueError('Actions run must succeed for BUILD.json source_commit and Plan Viewer workflow')
     jobs = api(f'repos/{repo}/actions/runs/{run_id}/jobs?per_page=100')['jobs']
     expected_jobs = {'Linux x64', 'Windows x64', 'macOS Apple Silicon', 'macOS Intel', 'Checksums', 'Plan compatibility'}
+    if legacy:
+        expected_jobs.remove('Plan compatibility')
     if {j['name'] for j in jobs} != expected_jobs or any(j['conclusion'] != 'success' for j in jobs):
-        raise ValueError('All platform, checksum and Plan compatibility jobs must succeed')
+        raise ValueError('All required build and verification jobs must succeed')
     tree = api(f'repos/{repo}/git/trees/{run["head_sha"]}?recursive=1')
     if tree.get('truncated'):
         raise ValueError('GitHub source tree is truncated; cannot establish source identity')
-    remote = {e['path']: e['sha'] for e in tree['tree']
-              if e['type'] == 'blob' and build_input(e['path'])}
+    def effective_path(path):
+        return path[len(LEGACY_PREFIX):] if legacy and path.startswith(LEGACY_PREFIX) else (None if legacy else path)
+    def relevant(path):
+        return path is not None and build_input(path) and (not legacy or path != WORKFLOW)
+    remote = {effective_path(e['path']): e['sha'] for e in tree['tree']
+              if e['type'] == 'blob' and relevant(effective_path(e['path']))}
     paths = command('git', '-C', str(root), 'ls-files', '--cached', '--others', '--exclude-standard').decode().splitlines()
-    local = {p: command('git', '-C', str(root), 'hash-object', '--path=' + p, p).decode().strip() for p in paths if build_input(p)}
+    local = {p: command('git', '-C', str(root), 'hash-object', '--path=' + p, p).decode().strip() for p in paths if relevant(p)}
     if local != remote:
         changed = sorted(p for p in local.keys() | remote.keys() if local.get(p) != remote.get(p))
         raise ValueError('Actions source differs from current Viewer/workflow: ' + ', '.join(changed))
@@ -128,7 +140,8 @@ def verify(root, assets, releases=()):
                 if attachment['name'] in published:
                     verify_attachment(attachment, assets / attachment['name'])
     return {'version': version, 'source_commit': run['head_sha'], 'workflow_run': run['html_url'],
-            'source_files_verified': len(local), 'assets': {name: sums.get(name, digest(assets / name))
+            'source_files_verified': len(local), 'original_build_reused': legacy,
+            'assets': {name: sums.get(name, digest(assets / name))
                                                         for name in sorted(names | {'SHA256SUMS.txt'})},
             'releases_verified': list(releases)}
 
