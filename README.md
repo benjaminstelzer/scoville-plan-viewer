@@ -16,10 +16,6 @@ Scoville Plan Skill.
 - Projects are read-only. Removing an entry from the Viewer leaves its files alone.
 - Release downloads come from four platform builds and include SHA-256 checksums.
 
-## What it costs
-
-- Keep local project paths accessible and use a Viewer that supports your Plan format.
-
 ## How it was developed
 
 The Viewer grew alongside Scoville Plan to make repository records easier to
