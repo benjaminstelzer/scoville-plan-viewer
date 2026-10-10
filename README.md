@@ -66,8 +66,8 @@ does not dispatch agents or edit Plans.
 
 ## Developer links
 
-See [the build and release guide](development/README.md). Native bundles are
-built by this repository's `Plan Viewer` GitHub Actions workflow.
+See [the build and release guide](development/README.md). Future native builds
+use this repository's `Plan Viewer` GitHub Actions workflow.
 
 ## License
 
